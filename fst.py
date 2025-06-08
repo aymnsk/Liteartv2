@@ -6,7 +6,7 @@ import os
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Core layers used for the transformer
+# ---------------------- Model Definition ---------------------
 class ConvLayer(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride):
         super().__init__()
@@ -83,33 +83,41 @@ class TransformerNet(nn.Module):
         y = self.deconv3(y)
         return y
 
+# ---------------------- Model Loader -------------------------
 def load_model(style_name):
     model_path = os.path.join("models", f"{style_name}.pth")
-    model = TransformerNet()
-    state_dict = torch.load(model_path, map_location=device)
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model not found: {model_path}")
 
-    # Load only matching keys (ignores keys that don't fit)
-    model.load_state_dict(state_dict, strict=False)
-    model.to(device).eval()
+    model = TransformerNet().to(device)
+    try:
+        state_dict = torch.load(model_path, map_location=device)
+        model.load_state_dict(state_dict, strict=False)
+    except Exception as e:
+        raise RuntimeError(f"Failed to load model for style '{style_name}': {e}")
+
+    model.eval()
     return model
 
+# ---------------------- Style Transfer Logic -------------------------
 def apply_style_transfer(content_img, style_name="mosaic"):
     preprocess = transforms.Compose([
         transforms.Resize(512),
         transforms.ToTensor(),
-        transforms.Lambda(lambda x: x[:3]),
+        transforms.Lambda(lambda x: x[:3]),  # Ensure 3 channels
+        transforms.Lambda(lambda x: x.mul(255))
     ])
 
     postprocess = transforms.Compose([
+        transforms.Lambda(lambda x: x.div(255)),
         transforms.Lambda(lambda x: torch.clamp(x, 0, 1)),
         transforms.ToPILImage(),
     ])
 
     model = load_model(style_name)
-
     content_tensor = preprocess(content_img).unsqueeze(0).to(device)
 
     with torch.no_grad():
         output_tensor = model(content_tensor).cpu().squeeze(0)
-    output_img = postprocess(output_tensor)
-    return output_img
+
+    return postprocess(output_tensor)
